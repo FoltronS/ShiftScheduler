@@ -254,6 +254,7 @@
           <div class="sc-col sc-col-sub">缩写</div>
           <div class="sc-col sc-col-time">时间范围</div>
           <div class="sc-col sc-col-orig">CSV 原始名称</div>
+          <div class="sc-col sc-col-consec">连续上限</div>
           <div class="sc-col sc-col-del"></div>
         </div>
         <div id="shift-config-rows"></div>
@@ -315,7 +316,7 @@
 </div>
 
 <!-- ── VIOLATIONS MODAL ──────────────────────────────────────────────────────── -->
-<div class="overlay" id="viol-overlay">
+<div class="overlay" id="viol-overlay" onclick="if(event.target===this)closeViolationsModal()">
   <div class="viol-modal">
     <div class="viol-header">
       <div class="viol-title">
@@ -326,11 +327,6 @@
         违规详情
         <span class="viol-modal-month" id="viol-modal-month"></span>
       </div>
-      <button class="settings-close" onclick="closeViolationsModal()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
     </div>
     <div class="viol-body" id="viol-body"></div>
   </div>

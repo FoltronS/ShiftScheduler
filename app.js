@@ -899,6 +899,10 @@ function _shiftRowHTML(s, i) {
       <input class="cfg-input" id="cfg-orig-${i}" value="${esc(s.orig)}" placeholder="CSV/TSV 原始名"
         oninput="_draftUpdate(${i},'orig',this.value)">
     </div>
+    <div class="sc-col sc-col-consec">
+      <input class="cfg-input cfg-input-num" id="cfg-consec-${i}" type="number" min="1" max="31" value="${s.consec ?? 3}"
+        oninput="_draftUpdate(${i},'consec',Math.max(1,+this.value||1))">
+    </div>
     <div class="sc-col sc-col-del">
       <button class="btn-del-shift" title="删除此班次" onclick="_deleteShiftRow(${i})">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -932,7 +936,7 @@ async function _deleteShiftRow(i) {
 }
 
 function addShiftRow() {
-  _draftShifts.push({ id: uid(), lbl: '新班次', sub: 'New', time: '00:00–00:00', color: '#64748b', txt: '#ffffff', orig: 'NewShift' });
+  _draftShifts.push({ id: uid(), lbl: '新班次', sub: 'New', time: '00:00–00:00', color: '#64748b', txt: '#ffffff', orig: 'NewShift', consec: 3 });
   _renderShiftRows();
   const rows = document.querySelectorAll('.shift-config-row');
   if (rows.length) rows[rows.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -950,13 +954,15 @@ function saveSettings() {
     const lbl  = document.getElementById(`cfg-lbl-${i}`)?.value.trim();
     const sub  = document.getElementById(`cfg-sub-${i}`)?.value.trim();
     const time = document.getElementById(`cfg-time-${i}`)?.value.trim();
-    const orig = document.getElementById(`cfg-orig-${i}`)?.value.trim();
-    const col  = document.getElementById(`cfg-color-${i}`)?.value;
-    if (lbl)  s.lbl  = lbl;
-    if (sub)  s.sub  = sub;
-    if (time) s.time = time;
-    if (orig) s.orig = orig;
-    if (col)  { s.color = col; s.txt = _autoTextColor(col); }
+    const orig   = document.getElementById(`cfg-orig-${i}`)?.value.trim();
+    const col    = document.getElementById(`cfg-color-${i}`)?.value;
+    const consec = parseInt(document.getElementById(`cfg-consec-${i}`)?.value, 10);
+    if (lbl)              s.lbl    = lbl;
+    if (sub)              s.sub    = sub;
+    if (time)             s.time   = time;
+    if (orig)             s.orig   = orig;
+    if (col)            { s.color  = col; s.txt = _autoTextColor(col); }
+    if (consec >= 1)      s.consec = consec;
   });
   if (_draftShifts.length === 0) { alert('至少需要保留一种班次类型'); return; }
 

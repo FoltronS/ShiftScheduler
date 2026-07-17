@@ -7,10 +7,10 @@
 //  DEFAULT SHIFT DEFINITIONS  (matches the original screenshot)
 // ─────────────────────────────────────────────────────────────────────────────
 const DEFAULT_SHIFTS = [
-  { id: 'night',   lbl: '夜班', sub: '0-8',   time: '00:00–08:00', color: '#1e3a5f', txt: '#ffffff', orig: 'Patrol/0-8'      },
-  { id: 'day',     lbl: '白班', sub: '8-16',  time: '08:00–16:00', color: '#f59e0b', txt: '#1a1a1a', orig: 'Patrol/8-16'     },
-  { id: 'evening', lbl: '晚班', sub: '16-24', time: '16:00–00:00', color: '#0d9488', txt: '#ffffff', orig: 'Patrol/16-24'    },
-  { id: 'off',     lbl: '休息', sub: '—',     time: '当天休息',    color: '#e5e7eb', txt: '#6b7280', orig: '休息'            },
+  { id: 'night',   lbl: '夜班', sub: '0-8',   time: '00:00–08:00', color: '#1e3a5f', txt: '#ffffff', orig: 'Patrol/0-8',   consec: 3 },
+  { id: 'day',     lbl: '白班', sub: '8-16',  time: '08:00–16:00', color: '#f59e0b', txt: '#1a1a1a', orig: 'Patrol/8-16',  consec: 5 },
+  { id: 'evening', lbl: '晚班', sub: '16-24', time: '16:00–00:00', color: '#0d9488', txt: '#ffffff', orig: 'Patrol/16-24', consec: 4 },
+  { id: 'off',     lbl: '休息', sub: '—',     time: '当天休息',    color: '#e5e7eb', txt: '#6b7280', orig: '休息',         consec: 2 },
 ];
 
 const DEFAULT_DEPT = 'Starsun';
@@ -142,14 +142,15 @@ function toggleShowHidden() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  VALIDATION RULES
-//  Rule 1  – consecutive limits: night≤3, day≤5, evening≤4, off≤2
+//  Rule 1  – consecutive limits: per shift, stored as shift.consec
 //  Rule 2  – after hitting the consecutive limit the NEXT day must be rest
 //  Rule 3  – no more than MAX_WORK_RUN consecutive work days (any shift type)
 //  Rule 4  – exactly 8 rest days/month, with exactly one 2-day block
 //  Rule 5  – per-day: every shift needs ≥1 worker; max scales with team size
 //  Rule 6  – rest between consecutive shifts must be > MIN_SHIFT_GAP hours
 // ─────────────────────────────────────────────────────────────────────────────
-const CONSEC_LIMITS   = { night: 3, day: 5, evening: 4, off: 2 };
+// Derived from SHIFTS[].consec — rebuilt by rebuildMaps() whenever shifts change
+let CONSEC_LIMITS     = {};
 const MAX_WORK_RUN    = 5;   // Rule 3: max consecutive work days (any shift type) before rest
 const MIN_SHIFT_GAP   = 8;   // Rule 6: gap between consecutive shifts (hours, exclusive)
 const REST_DAYS_MONTH = 8;   // Rule 4: required rest days per month
@@ -189,8 +190,9 @@ function setShift(eid, d, sid) {
 }
 
 function rebuildMaps() {
-  SMAP = Object.fromEntries(SHIFTS.map(s => [s.id, s]));
-  OMAP = Object.fromEntries(SHIFTS.map(s => [s.orig, s.id]));
+  SMAP          = Object.fromEntries(SHIFTS.map(s => [s.id, s]));
+  OMAP          = Object.fromEntries(SHIFTS.map(s => [s.orig, s.id]));
+  CONSEC_LIMITS = Object.fromEntries(SHIFTS.map(s => [s.id, s.consec ?? 99]));
 }
 
 function cycleShift(cur) {
@@ -242,6 +244,9 @@ function load() {
 
   // Migrate: remove weekend shift if it still exists in saved config
   SHIFTS = SHIFTS.filter(s => s.id !== 'weekend');
+  // Migrate: add consec field if missing (old saves won't have it)
+  const _defaultConsec = { night: 3, day: 5, evening: 4, off: 2 };
+  SHIFTS.forEach(s => { if (s.consec === undefined) s.consec = _defaultConsec[s.id] ?? 3; });
   rebuildMaps();
 
   const e   = localStorage.getItem('ss_emp');

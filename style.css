@@ -555,7 +555,9 @@ thead .c-name { z-index: 30; background: var(--th-bg); left: 0; }
   box-shadow: var(--shadow-lg);
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;
 }
+.viol-modal::-webkit-scrollbar { display: none; }
 .viol-header {
   display: flex;
   align-items: center;
@@ -945,11 +947,9 @@ th.dh.viol-day .dh-wd  { color: #ef4444; }
 
 .settings-body {
   padding: 20px 24px;
-  overflow-y: auto;
+  overflow-y: hidden;
   flex: 1;
 }
-.settings-body::-webkit-scrollbar { width: 5px; }
-.settings-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 
 .settings-section-title {
   font-size: 13px;
@@ -974,6 +974,15 @@ th.dh.viol-day .dh-wd  { color: #ef4444; }
   margin-bottom: 12px;
 }
 
+#shift-config-rows {
+  max-height: 196px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+#shift-config-rows::-webkit-scrollbar { width: 5px; }
+#shift-config-rows::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
 .shift-config-head {
   display: flex;
   align-items: center;
@@ -994,12 +1003,14 @@ th.dh.viol-day .dh-wd  { color: #ef4444; }
 .shift-config-row:hover { background: #fafafa; }
 
 .sc-col { display: flex; align-items: center; }
-.sc-col-color { width: 52px; flex-shrink: 0; justify-content: center; }
-.sc-col-label { flex: 1.2; min-width: 80px; }
-.sc-col-sub   { flex: 0.9; min-width: 70px; }
-.sc-col-time  { flex: 2;   min-width: 140px; }
-.sc-col-orig  { flex: 2;   min-width: 140px; }
-.sc-col-del   { width: 34px; flex-shrink: 0; justify-content: center; }
+.sc-col-color  { width: 52px;  flex-shrink: 0; justify-content: center; }
+.sc-col-label  { flex: 1.2; min-width: 80px; }
+.sc-col-sub    { flex: 0.9; min-width: 70px; }
+.sc-col-time   { flex: 2;   min-width: 140px; }
+.sc-col-orig   { flex: 2;   min-width: 140px; }
+.sc-col-consec { width: 68px; flex-shrink: 0; }
+.sc-col-del    { width: 34px; flex-shrink: 0; justify-content: center; }
+.cfg-input-num { text-align: center; padding-left: 4px; padding-right: 4px; }
 
 .shift-config-head .sc-col {
   font-size: 10px;
