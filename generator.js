@@ -580,10 +580,8 @@ async function _runGenerator(year, month, D, emps) {
 
   // Per-day off budget: ensures every day keeps ≥3 workers available.
   // maxOffPerDay = emps - 3; if budget is insufficient (too few employees), skip constraint.
-  // Weekends (Sat/Sun) use a tighter cap of 1 to keep more staff available those days.
-  const maxOffPerDay   = emps.length - 3;
-  const weekendOffCap  = Math.min(maxOffPerDay, 1);
-  const budgetFeasible = maxOffPerDay >= 1 && (maxOffPerDay * D) >= (emps.length * REST_DAYS_MONTH);
+  const maxOffPerDay  = emps.length - 3;
+  const budgetFeasible = maxOffPerDay >= 1 && (maxOffPerDay * D) >= (emps.length * 8);
 
   const MAX_ATTEMPTS = 800;
 
@@ -595,14 +593,9 @@ async function _runGenerator(year, month, D, emps) {
     const draft = {};
     let ok = true;
 
-    // Shared off budget, reset each attempt (mutated as employees are assigned).
-    // Weekend days are capped at 1 off worker so Sat/Sun always have ≥4 staff.
+    // Shared off budget, reset each attempt (mutated as employees are assigned)
     const offBudget = budgetFeasible
-      ? Object.fromEntries(Array.from({ length: D }, (_, i) => {
-          const d   = i + 1;
-          const dow = new Date(year, month - 1, d).getDay();
-          return [d, (dow === 0 || dow === 6) ? weekendOffCap : maxOffPerDay];
-        }))
+      ? Object.fromEntries(Array.from({ length: D }, (_, i) => [i + 1, maxOffPerDay]))
       : null;
 
     // ── Step 1: generate off-day pattern per employee ─────────────────────
