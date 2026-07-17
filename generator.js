@@ -582,7 +582,7 @@ async function _runGenerator(year, month, D, emps) {
   // maxOffPerDay = emps - 3; if budget is insufficient (too few employees), skip constraint.
   // Weekends (Sat/Sun) use a tighter cap of 1 to keep more staff available those days.
   const maxOffPerDay   = emps.length - 3;
-  const weekendOffCap  = 0;  // no one off on Sat/Sun → always 5 workers on weekends
+  const weekendOffCap  = Math.min(maxOffPerDay, 1);
   const budgetFeasible = maxOffPerDay >= 1 && (maxOffPerDay * D) >= (emps.length * REST_DAYS_MONTH);
 
   const MAX_ATTEMPTS = 800;
