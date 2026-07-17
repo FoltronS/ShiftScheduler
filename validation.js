@@ -160,13 +160,24 @@ function _getDayViolations(year, month, d) {
     const s = getShift(emp.id, date); return s && s !== 'off';
   }).length;
   workShifts.forEach(s => {
-    const count       = vis.filter(emp => getShift(emp.id, date) === s.id).length;
-    const isPreferred = s.id === 'evening';  // 16-24 prefers more workers
+    const count   = vis.filter(emp => getShift(emp.id, date) === s.id).length;
     // All shifts need ≥1 worker (only flagged when enough staff exist to cover all shifts)
     const minViol = totalWorking >= workShifts.length && count < 1;
     if (count > maxPS || minViol)
-      violations.push({ sid: s.id, lbl: s.lbl, count, maxPS, isPreferred });
+      violations.push({ rule: 4, sid: s.id, lbl: s.lbl, count, maxPS });
   });
+
+  // Rule 7 (hard): night shift max 1 worker on Tue–Sat
+  const dow = new Date(year, month - 1, d).getDay(); // 0=Sun, 6=Sat
+  if (dow >= 2 && dow <= 6) {
+    const nightCount = vis.filter(emp => getShift(emp.id, date) === 'night').length;
+    // Only report if Rule 4 didn't already flag it (Rule 4 uses a looser cap)
+    if (nightCount > 1 && !violations.some(v => v.sid === 'night'))
+      violations.push({ rule: 7, sid: 'night', lbl: '夜班', count: nightCount, maxPS: 1 });
+  }
+  // Rule 8 (soft): day shift ≤1 on Mon–Sat — generator optimises for this but
+  // violations are not surfaced in the UI since they are expected and acceptable.
+
   return { violations, hasViol: violations.length > 0 };
 }
 
@@ -199,6 +210,7 @@ function openViolationsModal() {
     4:   { bg: '#fdf4ff', bd: '#e9d5ff', cl: '#7e22ce', lb: '规则 4'  },
     5:   { bg: '#fff7ed', bd: '#fed7aa', cl: '#c2410c', lb: '规则 5'  },
     6:   { bg: '#fef2f2', bd: '#fca5a5', cl: '#dc2626', lb: '规则 6'  },
+    7:   { bg: '#fef2f2', bd: '#fca5a5', cl: '#dc2626', lb: '规则 7'  },
   };
 
   function rBadge(rule) {
@@ -222,10 +234,15 @@ function openViolationsModal() {
     const dv = _getDayViolations(curYear, curMonth, d);
     if (!dv.hasViol) continue;
     const rows = dv.violations.map(v => {
-      const text = v.count < 1
-        ? v.lbl + '：0人（需至少 1 人）'
-        : v.lbl + '：' + v.count + ' 人（上限 ' + v.maxPS + ' 人）';
-      return rRow(4, text);
+      let text;
+      if (v.count < 1) {
+        text = v.lbl + '：0人（需至少 1 人）';
+      } else if (v.rule === 7) {
+        text = '夜班 ' + v.count + ' 人（周二-六上限 1 人）';
+      } else {
+        text = v.lbl + '：' + v.count + ' 人（上限 ' + v.maxPS + ' 人）';
+      }
+      return rRow(v.rule || 4, text);
     }).join('');
     dayBlocks.push(empBlock(curMonth + '月' + d + '日', rows));
   }

@@ -4,6 +4,16 @@
    ══════════════════════════════════════════════════════════════════════════════ */
 
 function _randInt(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }
+
+// Effective per-shift cap for a specific day.
+// Night shift (0-8): hard cap of 1 on Tue–Sat (dow 2-6); standard cap otherwise.
+// All other shifts: standard cap.
+function _shiftDayCap(shiftId, year, month, d, empCount) {
+  const dow = new Date(year, month - 1, d).getDay(); // 0=Sun, 6=Sat
+  if (shiftId === 'night' && dow >= 2 && dow <= 6) return 1;
+  return _maxPerShift(empCount);
+}
+
 function _shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = _randInt(0, i); [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -353,9 +363,9 @@ function _rebalanceIndividual(draft, emps, year, month, D) {
             const othersOver = emps.filter(e => e.id !== emp.id && draft[e.id]?.[date] === over).length;
             if (othersOver < 1) continue;
 
-            // Coverage: `under` must not exceed maxPerShift on this day
+            // Coverage: `under` must not exceed its effective daily cap on this day
             const othersUnder = emps.filter(e => e.id !== emp.id && draft[e.id]?.[date] === under).length;
-            if (othersUnder >= _maxPerShift(emps.length)) continue;
+            if (othersUnder >= _shiftDayCap(under, year, month, d, emps.length)) continue;
 
             // Rule 6: gap with adjacent non-off work days
             let gapOk = true;
@@ -450,11 +460,13 @@ function _balanceRule4(draft, emps, year, month, D) {
         }
       }
 
-      // ── Fix 2: no shift may exceed maxPerShift workers ───────────────────
+      // ── Fix 2: no shift may exceed its effective daily cap ───────────────
+      // Night shift is capped at 1 on Tue–Sat (hard rule); others use maxPS.
       for (const over of WS) {
-        while (cnt[over] > maxPS) {
+        const cap = _shiftDayCap(over, year, month, d, emps.length);
+        while (cnt[over] > cap) {
           anyViol = true;
-          const under = WS.filter(s => s !== over && cnt[s] < maxPS)
+          const under = WS.filter(s => s !== over && cnt[s] < _shiftDayCap(s, year, month, d, emps.length))
                           .sort((a, b) => (a === 'evening' ? -1 : b === 'evening' ? 1 : 0));
           let fixed = false;
           for (const to of under) {
@@ -469,6 +481,25 @@ function _balanceRule4(draft, emps, year, month, D) {
             if (fixed) break;
           }
           if (!fixed) break;
+        }
+      }
+
+      // ── Fix 3 (soft): day shift prefers ≤1 worker on Mon–Sat ────────────
+      // Best-effort only; does not set anyViol so failure doesn't retry the whole draft.
+      const dow3 = new Date(year, month - 1, d).getDay();
+      if (dow3 >= 1 && dow3 <= 6 && cnt['day'] > 1) {
+        for (const to of ['evening', 'night']) {
+          if (cnt[to] === undefined) continue;
+          if (cnt[to] >= _shiftDayCap(to, year, month, d, emps.length)) continue;
+          for (const eid of byFewest(by['day'], to)) {
+            if (_trySetShift(draft, eid, year, month, D, d, to)) {
+              cnt[to]++; cnt['day']--;
+              by[to].push(eid); by['day'] = by['day'].filter(e => e !== eid);
+              empCnt[eid][to]++; empCnt[eid]['day']--;
+              break;
+            }
+          }
+          if (cnt['day'] <= 1) break;
         }
       }
 
@@ -549,8 +580,10 @@ async function _runGenerator(year, month, D, emps) {
 
   // Per-day off budget: ensures every day keeps ≥3 workers available.
   // maxOffPerDay = emps - 3; if budget is insufficient (too few employees), skip constraint.
-  const maxOffPerDay  = emps.length - 3;
-  const budgetFeasible = maxOffPerDay >= 1 && (maxOffPerDay * D) >= (emps.length * 8);
+  // Weekends (Sat/Sun) use a tighter cap of 1 to keep more staff available those days.
+  const maxOffPerDay   = emps.length - 3;
+  const weekendOffCap  = 0;  // no one off on Sat/Sun → always 5 workers on weekends
+  const budgetFeasible = maxOffPerDay >= 1 && (maxOffPerDay * D) >= (emps.length * REST_DAYS_MONTH);
 
   const MAX_ATTEMPTS = 800;
 
@@ -562,9 +595,14 @@ async function _runGenerator(year, month, D, emps) {
     const draft = {};
     let ok = true;
 
-    // Shared off budget, reset each attempt (mutated as employees are assigned)
+    // Shared off budget, reset each attempt (mutated as employees are assigned).
+    // Weekend days are capped at 1 off worker so Sat/Sun always have ≥4 staff.
     const offBudget = budgetFeasible
-      ? Object.fromEntries(Array.from({ length: D }, (_, i) => [i + 1, maxOffPerDay]))
+      ? Object.fromEntries(Array.from({ length: D }, (_, i) => {
+          const d   = i + 1;
+          const dow = new Date(year, month - 1, d).getDay();
+          return [d, (dow === 0 || dow === 6) ? weekendOffCap : maxOffPerDay];
+        }))
       : null;
 
     // ── Step 1: generate off-day pattern per employee ─────────────────────
@@ -743,6 +781,14 @@ async function _runGenerator(year, month, D, emps) {
     for (const emp of emps) {
       const vr = _getViolations(emp.id, year, month);
       if (vr.consecViol.size || vr.weekViol.size || (vr.gapViol?.size || 0) > 0 || vr.rowViol) { valid = false; break; }
+    }
+    // Also check daily hard coverage rules (Rule 5 and Rule 7) while draft is loaded
+    if (valid) {
+      for (let d = 1; d <= D && valid; d++) {
+        const dv = _getDayViolations(year, month, d);
+        // Rule 8 is soft — only hard violations (rule !== 8) cause a retry
+        if (dv.violations.some(v => !v.soft)) valid = false;
+      }
     }
     for (const emp of emps) schedule[emp.id] = bak[emp.id]; // always restore
 
