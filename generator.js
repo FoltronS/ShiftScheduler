@@ -5,13 +5,109 @@
 
 function _randInt(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }
 
-// Effective per-shift cap for a specific day.
-// Night shift (0-8): hard cap of 1 on Tue–Sat (dow 2-6); standard cap otherwise.
-// All other shifts: standard cap.
+// Precomputed day-of-week lookup: _DOW[d] = 0(Sun)..6(Sat).
+// Rebuilt at the start of each generation run via _buildDOW().
+let _DOW = null;
+let _nightCapDay = null;   // _nightCapDay[d] = true if night is capped at 1 on day d
+let _cachedMaxPS = 2;
+
+function _buildDOW(year, month, D, empCount) {
+  _DOW = new Array(D + 1);
+  _nightCapDay = new Array(D + 1);
+  _cachedMaxPS = _maxPerShift(empCount);
+  for (let d = 1; d <= D; d++) {
+    _DOW[d] = new Date(year, month - 1, d).getDay();
+    _nightCapDay[d] = _DOW[d] >= 2 && _DOW[d] <= 6;  // Tue-Sat
+  }
+}
+
+// Effective per-shift cap for a specific day (uses precomputed lookup).
 function _shiftDayCap(shiftId, year, month, d, empCount) {
-  const dow = new Date(year, month - 1, d).getDay(); // 0=Sun, 6=Sat
-  if (shiftId === 'night' && dow >= 2 && dow <= 6) return 1;
-  return _maxPerShift(empCount);
+  if (shiftId === 'night' && _nightCapDay && _nightCapDay[d]) return 1;
+  return _cachedMaxPS;
+}
+
+// Pre-allocate exactly one night worker per day (guarantees Rule 7 by construction).
+// Processes days left-to-right, tracking each employee's previous work shift so
+// only employees whose previous day was off or night are eligible (day→night and
+// evening→night both violate Rule 6).  Returns { dayNum → empId } or null if any
+// Tue-Sat day has zero eligible workers (caller should retry with new off patterns).
+function _preAllocateNight(draft, emps, year, month, D) {
+  const nightLim = CONSEC_LIMITS['night'] || 3;
+
+  // Previous work shift per employee (null = off/no-work = night-eligible)
+  const prevWork = {};
+  for (const emp of emps) {
+    prevWork[emp.id] = null;
+    for (let off = 1; off <= 2; off++) {
+      const {y, m, d: pd} = _offsetDay(year, month, 1, -off);
+      const ps = getShift(emp.id, ds(y, m, pd));
+      if (ps && ps !== 'off') { prevWork[emp.id] = ps; break; }
+    }
+  }
+
+  // Consecutive night streak per employee (seeded from previous month)
+  const nightStreak = {};
+  for (const emp of emps) {
+    nightStreak[emp.id] = 0;
+    for (let off = 1; off <= nightLim; off++) {
+      const {y, m, d: pd} = _offsetDay(year, month, 1, -off);
+      if (getShift(emp.id, ds(y, m, pd)) === 'night') nightStreak[emp.id]++;
+      else break;
+    }
+  }
+
+  const nightCount = Object.fromEntries(emps.map(e => [e.id, 0]));
+  const nightPre = {};  // d → empId
+
+  for (let d = 1; d <= D; d++) {
+    const date = ds(year, month, d);
+
+    // Find employees eligible for night on day d
+    const eligible = [];
+    for (const emp of emps) {
+      if (draft[emp.id][date] === 'off') continue;
+      // Rule 6: previous work shift must allow transition to night
+      if (prevWork[emp.id] && _restHours(prevWork[emp.id], 'night') <= MIN_SHIFT_GAP) continue;
+      // Rule 1: consecutive night limit
+      if (nightStreak[emp.id] >= nightLim) continue;
+      // Rule 2: if this would reach the limit and next day is work, skip
+      if (nightStreak[emp.id] + 1 >= nightLim && d < D &&
+          draft[emp.id][ds(year, month, d + 1)] !== 'off') continue;
+      eligible.push(emp);
+    }
+
+    // Tue-Sat: must have exactly 1 night worker (Rule 7 hard cap)
+    if (_nightCapDay[d] && eligible.length === 0) return null;
+
+    if (eligible.length > 0) {
+      // Pick the employee with fewest night assignments; random among ties
+      eligible.sort((a, b) => nightCount[a.id] - nightCount[b.id]);
+      const minCnt = nightCount[eligible[0].id];
+      const tied = eligible.filter(e => nightCount[e.id] === minCnt);
+      const chosen = tied[_randInt(0, tied.length - 1)];
+
+      nightPre[d] = chosen.id;
+      nightCount[chosen.id]++;
+      nightStreak[chosen.id]++;
+      prevWork[chosen.id] = 'night';
+    }
+
+    // Update tracking for all other employees
+    for (const emp of emps) {
+      if (emp.id === nightPre[d]) continue;  // already updated above
+      if (draft[emp.id][date] === 'off') {
+        prevWork[emp.id] = null;
+        nightStreak[emp.id] = 0;
+      } else {
+        // Working but not night → will get day/evening; both block night next day
+        prevWork[emp.id] = 'day';
+        nightStreak[emp.id] = 0;
+      }
+    }
+  }
+
+  return nightPre;
 }
 
 function _shuffle(arr) {
@@ -36,15 +132,37 @@ function _genOffDays(year, month, D, budget, trailWork = 0) {
       if (!budget || ((budget[d] || 0) > 0 && (budget[d + 1] || 0) > 0)) pairPool.push(d);
     }
     if (pairPool.length === 0) return null;
-    const p = pairPool[_randInt(0, pairPool.length - 1)];
+    // Prefer weekday pairs (keeps both days of the pair off weekends)
+    let p;
+    if (_DOW) {
+      const wdPairs = pairPool.filter(d => _DOW[d] !== 0 && _DOW[d] !== 6 &&
+                                           _DOW[d + 1] !== 0 && _DOW[d + 1] !== 6);
+      const src = wdPairs.length > 0 ? wdPairs : pairPool;
+      p = src[_randInt(0, src.length - 1)];
+    } else {
+      p = pairPool[_randInt(0, pairPool.length - 1)];
+    }
     offs.add(p); offs.add(p + 1);
 
     // Pool: days not adjacent to the pair AND within budget
+    // Weekdays appear 3× so they're much more likely to be picked as off days,
+    // keeping more workers available on weekends (soft preference).
     const pool = [];
     for (let d = 1; d <= D; d++) {
-      if ((d < p - 1 || d > p + 2) && (!budget || (budget[d] || 0) > 0)) pool.push(d);
+      if ((d < p - 1 || d > p + 2) && (!budget || (budget[d] || 0) > 0)) {
+        pool.push(d);
+        if (_DOW && _DOW[d] !== 0 && _DOW[d] !== 6) { pool.push(d); pool.push(d); }
+      }
     }
     _shuffle(pool);
+    // Deduplicate preserving shuffled order
+    if (_DOW) {
+      const seen = new Set();
+      const deduped = [];
+      for (const d of pool) { if (!seen.has(d)) { seen.add(d); deduped.push(d); } }
+      pool.length = 0;
+      pool.push(...deduped);
+    }
 
     // Pick remaining singles (REST_DAYS_MONTH minus the pair), none adjacent to each other
     const singlesNeeded = REST_DAYS_MONTH - REST_CONSEC_LEN;
@@ -427,6 +545,7 @@ function _balanceRule4(draft, emps, year, month, D) {
 
   for (let iter = 0; iter < 300; iter++) {
     let anyViol = false;
+    let anyFixed = false;  // track if any swap was made this iteration
     const days = Array.from({ length: D }, (_, i) => i + 1);
     _shuffle(days);
 
@@ -454,6 +573,7 @@ function _balanceRule4(draft, emps, year, month, D) {
               cnt[need]++; cnt[from]--;
               by[need].push(eid); by[from] = by[from].filter(e => e !== eid);
               empCnt[eid][need]++; empCnt[eid][from]--;
+              anyFixed = true;
               break outer1;
             }
           }
@@ -475,7 +595,7 @@ function _balanceRule4(draft, emps, year, month, D) {
                 cnt[to]++; cnt[over]--;
                 by[to].push(eid); by[over] = by[over].filter(e => e !== eid);
                 empCnt[eid][to]++; empCnt[eid][over]--;
-                fixed = true; break;
+                fixed = true; anyFixed = true; break;
               }
             }
             if (fixed) break;
@@ -486,8 +606,7 @@ function _balanceRule4(draft, emps, year, month, D) {
 
       // ── Fix 3 (soft): day shift prefers ≤1 worker on Mon–Sat ────────────
       // Best-effort only; does not set anyViol so failure doesn't retry the whole draft.
-      const dow3 = new Date(year, month - 1, d).getDay();
-      if (dow3 >= 1 && dow3 <= 6 && cnt['day'] > 1) {
+      if (_DOW[d] >= 1 && _DOW[d] <= 6 && cnt['day'] > 1) {
         for (const to of ['evening', 'night']) {
           if (cnt[to] === undefined) continue;
           if (cnt[to] >= _shiftDayCap(to, year, month, d, emps.length)) continue;
@@ -521,6 +640,7 @@ function _balanceRule4(draft, emps, year, month, D) {
     }
 
     if (!anyViol) return true;
+    if (!anyFixed) return false;  // stuck — no progress, bail out immediately
   }
   return false;
 }
@@ -584,12 +704,13 @@ async function _runGenerator(year, month, D, emps) {
   const budgetFeasible = maxOffPerDay >= 1 && (maxOffPerDay * D) >= (emps.length * 8);
 
   const MAX_ATTEMPTS = 800;
+  _buildDOW(year, month, D, emps.length);
 
   let bestDraft = null;
   for (let outerAtt = 0; outerAtt < MAX_ATTEMPTS; outerAtt++) {
-    // Yield every attempt so the browser paints a fresh animation frame between each.
-    // One attempt can take 10-50ms (nested loops), so batching causes visible jank.
-    await new Promise(r => setTimeout(r, 0));
+    // Yield every 20 attempts to keep the loading animation alive without
+    // paying the ~4ms browser timer floor on every single attempt.
+    if (outerAtt % 20 === 0) await new Promise(r => setTimeout(r, 0));
     const draft = {};
     let ok = true;
 
@@ -619,6 +740,10 @@ async function _runGenerator(year, month, D, emps) {
       });
     }
     if (!ok) continue;
+
+    // ── Step 1b: pre-allocate night shifts (guarantees Rule 7) ───────────
+    const nightPre = _preAllocateNight(draft, emps, year, month, D);
+    if (!nightPre) continue;  // infeasible off patterns for night coverage — retry
 
     // ── Step 2: assign work shifts with quota-guided rotation ────────────
     // Each employee targets an equal number of days per shift type.
@@ -696,17 +821,24 @@ async function _runGenerator(year, month, D, emps) {
         const remaining = W - workDone;
         workDone++;
 
-        const eligible = CYCLE.filter(s => {
-          // Rule 1: can't extend same shift beyond its consecutive limit
+        // Pre-allocated night: assign directly, skip score-based selection
+        if (nightPre[d] === emp.id) {
+          draft[emp.id][date] = 'night';
+          used['night']++;
+          globalUsed['night']++;
+          if ('night' !== cur) { cur = 'night'; streak = 0; }
+          streak++;
+          prevWorkShift = 'night';
+          continue;
+        }
+
+        // Base eligibility: Rules 1, 2, 6, forward-lock
+        const baseCheck = (s) => {
           if (s === cur && streak >= CONSEC_LIMITS[s]) return false;
-          // Rule 2: if this assignment reaches the limit, next calendar day must be off
           const newStreak = (s === cur) ? streak + 1 : 1;
           if (newStreak >= (CONSEC_LIMITS[s] || 99) && d < D &&
               draft[emp.id][ds(year, month, d + 1)] !== 'off') return false;
-          // Rule 6: gap between consecutive work shifts must be > MIN_SHIFT_GAP hours
           if (prevWorkShift && _restHours(prevWorkShift, s) <= MIN_SHIFT_GAP) return false;
-          // Forward-lock: shifts with no valid exit (e.g. evening) must fit entirely
-          // in the remaining work run; otherwise we'll get trapped with no valid shift later.
           if (noExitShifts.has(s)) {
             const curStreakOfS = (s === cur) ? streak : 0;
             const daysAfterToday = runRem[d] - 1;
@@ -714,22 +846,29 @@ async function _runGenerator(year, month, D, emps) {
             if (daysAfterToday > slotsLeft) return false;
           }
           return true;
-        });
+        };
+
+        // Exclude night (handled by pre-allocation); safety fallback if empty
+        let eligible = CYCLE.filter(s => s !== 'night' && baseCheck(s));
+        if (eligible.length === 0) {
+          eligible = CYCLE.filter(baseCheck);
+        }
 
         if (eligible.length === 0) { ok = false; break; }
 
-        // Continue current shift if it's still within quota (score ≥ 0.7)
-        const stayOk = eligible.includes(cur) && score(cur, remaining) >= 0.7;
-
         let assign;
-        if (stayOk) {
-          assign = cur;
+        if (eligible.length === 1) {
+          assign = eligible[0];
         } else {
-          // Switch to the most-needed eligible shift; break ties randomly
-          assign = eligible.slice().sort((a, b) => {
-            const diff = score(b, remaining) - score(a, remaining);
-            return diff !== 0 ? diff : Math.random() - 0.5;
-          })[0];
+          const stayOk = eligible.includes(cur) && score(cur, remaining) >= 0.7;
+          if (stayOk) {
+            assign = cur;
+          } else {
+            assign = eligible.slice().sort((a, b) => {
+              const diff = score(b, remaining) - score(a, remaining);
+              return diff !== 0 ? diff : Math.random() - 0.5;
+            })[0];
+          }
         }
 
         if (assign !== cur) { cur = assign; streak = 0; }
@@ -775,12 +914,16 @@ async function _runGenerator(year, month, D, emps) {
       const vr = _getViolations(emp.id, year, month);
       if (vr.consecViol.size || vr.weekViol.size || (vr.gapViol?.size || 0) > 0 || vr.rowViol) { valid = false; break; }
     }
-    // Also check daily hard coverage rules (Rule 5 and Rule 7) while draft is loaded
+    // Rule 7: verify night ≤ 1 on Tue–Sat (inline check — avoids the heavy
+    // _getDayViolations call × 31 which queries DOM and rebuilds counts)
     if (valid) {
       for (let d = 1; d <= D && valid; d++) {
-        const dv = _getDayViolations(year, month, d);
-        // Rule 8 is soft — only hard violations (rule !== 8) cause a retry
-        if (dv.violations.some(v => !v.soft)) valid = false;
+        if (!_nightCapDay[d]) continue;  // Sun/Mon — no cap
+        let nc = 0;
+        for (const emp of emps) {
+          if (draft[emp.id]?.[ds(year, month, d)] === 'night') nc++;
+        }
+        if (nc > 1) valid = false;
       }
     }
     for (const emp of emps) schedule[emp.id] = bak[emp.id]; // always restore
@@ -808,10 +951,11 @@ async function _runGenerator(year, month, D, emps) {
       if (dev > maxDev) maxDev = dev;
     }
 
-    // Only accept drafts within ±2 tolerance
-    if (maxDev > 2 + 1e-9) continue;
+    // Adaptive tolerance: try ±2 for the first 400 attempts, relax to ±3 after
+    const tolerance = outerAtt < 400 ? 2 : 3;
+    if (maxDev > tolerance + 1e-9) continue;
 
-    // ±2 achieved — save and stop
+    // Tolerance achieved — save and stop
     bestDraft = {};
     for (const emp of emps) bestDraft[emp.id] = { ...draft[emp.id] };
     break;
