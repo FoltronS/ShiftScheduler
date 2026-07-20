@@ -203,6 +203,7 @@ function _dragAdd(el, eid, date) {
 function dragEnd() {
   if (!dragging) return;
   dragging = false;
+  if (dragSet.size) undoPush();
   dragSet.forEach(k => {
     const [eid, date] = k.split('|');
     setShift(eid, date, dragShift);
@@ -249,6 +250,7 @@ function ctxShift(e, eid, date) {
 
 function _applyShift(sid) {
   if (_ctxCell) {
+    undoPush();
     setShift(_ctxCell.eid, _ctxCell.date, sid);
     if (curView === 'grid') updateCells(); else if (curView === 'timeline') renderTimeline(); else renderStats();
     // Sync worker detail modal if it's open for this employee
@@ -684,6 +686,7 @@ function importCSV(ev) {
         msg: '是否清空现有数据后导入？',
         note: '点击取消 = 追加/合并到现有员工',
       });
+      undoPush();
       if (replace) { employees = []; schedule = {}; }
 
       // ── Import each employee row ─────────────────────────────────────
@@ -776,9 +779,10 @@ async function resetCurrentMonth() {
   const ok = await showConfirm({
     title: '清除本月排班', variant: 'danger', okLabel: '确认清除',
     msg: `清除 ${label} 所有员工的排班数据？`,
-    note: '此操作不可撤销。',
+    note: '可通过 Ctrl+Z 撤销。',
   });
   if (!ok) return;
+  undoPush();
   const D = dim(curYear, curMonth);
   for (const emp of employees) {
     if (!schedule[emp.id]) continue;
@@ -1157,6 +1161,7 @@ function wdCellClick(d) {
   if (!_wdEmpId) return;
   const date = ds(_wdYear, _wdMonth, d);
   if (isMonthLocked(_wdYear, _wdMonth)) { showToast('该月份已锁定，无法修改排班'); return; }
+  undoPush();
   setShift(_wdEmpId, date, cycleShift(getShift(_wdEmpId, date)));
   _renderWdCalendar();
   _renderWdStats();
@@ -1479,6 +1484,9 @@ function renderStats() {
 // ─────────────────────────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeEmpModal(); closeSettings(); closeWorkerDetail(); closeViolationsModal(); _closeDiceConfirm(); _closeCtx(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

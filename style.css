@@ -91,7 +91,8 @@ body {
   gap: 8px;
 }
 
-.controls-left  { /* spacer */ }
+.controls-left  { display: flex; align-items: center; gap: 4px; }
+.ctrl-icon-btn.disabled { opacity: .3; pointer-events: none; }
 .controls-right { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
 
 .month-nav { display: flex; align-items: center; gap: 10px; justify-content: center; }

@@ -963,6 +963,7 @@ async function _runGenerator(year, month, D, emps) {
 
   // ── Apply best draft found ─────────────────────────────────────────────
   if (bestDraft) {
+    undoPush();
     for (const emp of emps) {
       if (!schedule[emp.id]) schedule[emp.id] = {};
       for (let d = 1; d <= D; d++) {

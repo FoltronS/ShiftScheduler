@@ -83,7 +83,18 @@
 
 <!-- ── CONTROLS BAR ─────────────────────────────────────────────────────────── -->
 <div class="controls">
-  <div class="controls-left"></div>
+  <div class="controls-left">
+    <button class="ctrl-icon-btn undo-btn disabled" id="btn-undo" onclick="undo()" title="撤销 (Ctrl+Z)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+      </svg>
+    </button>
+    <button class="ctrl-icon-btn redo-btn disabled" id="btn-redo" onclick="redo()" title="重做 (Ctrl+Shift+Z)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"/>
+      </svg>
+    </button>
+  </div>
   <div class="month-nav">
     <button class="nav-btn" onclick="changeMonth(-1)" title="上个月">&#8249;</button>
     <div class="month-label" id="month-label"></div>

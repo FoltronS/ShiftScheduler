@@ -55,6 +55,11 @@ let _lastViol    = {};
 // last computed day violations map (day number → { violations, hasViol })
 let _lastDayViol = {};
 
+// ── Undo / Redo stacks ──────────────────────────────────────────────────────
+const _undoStack = [];
+const _redoStack = [];
+const _UNDO_MAX  = 50;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  ROW DRAG-TO-REORDER
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,6 +215,39 @@ function save() {
   localStorage.setItem('ss_default_dept', defaultDept);
   localStorage.setItem('ss_mon',          JSON.stringify({ y: curYear, m: curMonth }));
   localStorage.setItem('ss_locked',       JSON.stringify(lockedMonths));
+}
+
+// ── Undo / Redo ──────────────────────────────────────────────────────────────
+function _scheduleSnapshot() { return JSON.parse(JSON.stringify(schedule)); }
+
+function undoPush() {
+  _undoStack.push(_scheduleSnapshot());
+  if (_undoStack.length > _UNDO_MAX) _undoStack.shift();
+  _redoStack.length = 0;
+  _updateUndoButtons();
+}
+
+function undo() {
+  if (!_undoStack.length) return;
+  _redoStack.push(_scheduleSnapshot());
+  schedule = _undoStack.pop();
+  save(); render();
+  _updateUndoButtons();
+}
+
+function redo() {
+  if (!_redoStack.length) return;
+  _undoStack.push(_scheduleSnapshot());
+  schedule = _redoStack.pop();
+  save(); render();
+  _updateUndoButtons();
+}
+
+function _updateUndoButtons() {
+  const uBtn = document.getElementById('btn-undo');
+  const rBtn = document.getElementById('btn-redo');
+  if (uBtn) uBtn.classList.toggle('disabled', !_undoStack.length);
+  if (rBtn) rBtn.classList.toggle('disabled', !_redoStack.length);
 }
 
 function isMonthLocked(y, m) {
